@@ -168,31 +168,25 @@ func buildTree(path string) TreeItem {
 	return rootItem
 }
 
-// Flatten the tree starting from the root item
 func flattenTree(item TreeItem, prefixes []bool) []TreeItem {
 	var flatTree []TreeItem
+
 	// Set prefixes for this item
 	item.Prefixes = make([]bool, len(prefixes))
 	copy(item.Prefixes, prefixes)
+
 	flatTree = append(flatTree, item)
 
-	// For the children, update prefixes
 	numChildren := len(item.Children)
 	for i, child := range item.Children {
-		child.IsLast = i == numChildren-1
-		// Create a copy of prefixes for the child
-		childPrefixes := make([]bool, len(prefixes))
-		copy(childPrefixes, prefixes)
-		if len(prefixes) > 0 {
-			// If the parent is not the root, append the appropriate prefix
-			childPrefixes = append(childPrefixes, !item.IsLast)
-		} else {
-			// For the root node, we start prefixes for its children
-			childPrefixes = append(childPrefixes, false)
-		}
-		// Recursively flatten the child
+		isLastChild := i == numChildren-1
+
+		// Append to prefixes
+		childPrefixes := append(prefixes, !isLastChild)
+
 		flatTree = append(flatTree, flattenTree(child, childPrefixes)...)
 	}
+
 	return flatTree
 }
 
@@ -235,34 +229,24 @@ func drawHorizontalSeparator(x, y, width int) {
 
 func formatTreeItem(item TreeItem) string {
 	var builder strings.Builder
-	if len(item.Prefixes) == 0 {
-		// Root node, no prefixes or tree characters
-		builder.WriteString(item.Display)
-	} else {
-		for i := 0; i < len(item.Prefixes)-1; i++ {
-			if item.Prefixes[i] {
-				builder.WriteString("│   ")
-			} else {
-				builder.WriteString("    ")
-			}
-		}
-		// Handle the final prefix before the item
-		if len(item.Prefixes) > 0 {
-			if item.Prefixes[len(item.Prefixes)-1] {
-				builder.WriteString("│   ")
-			} else {
-				builder.WriteString("    ")
-			}
-		}
 
-		// Add branch
-		if item.IsLast {
-			builder.WriteString("└── ")
+	for i := 0; i < len(item.Prefixes)-1; i++ {
+		if item.Prefixes[i] {
+			builder.WriteString("│   ")
 		} else {
-			builder.WriteString("├── ")
+			builder.WriteString("    ")
 		}
-		builder.WriteString(item.Display)
 	}
+
+	if len(item.Prefixes) > 0 {
+		if item.Prefixes[len(item.Prefixes)-1] {
+			builder.WriteString("├── ")
+		} else {
+			builder.WriteString("└── ")
+		}
+	}
+
+	builder.WriteString(item.Display)
 	return builder.String()
 }
 
