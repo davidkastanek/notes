@@ -79,17 +79,18 @@ func main() {
 				if currentSelection < len(flatTree)-1 {
 					currentSelection++
 				}
-			case tcell.KeyEnter:
-				handleSelection(flatTree[currentSelection])
-				tree = buildTree(root)
-				flatTree = flattenTree(tree, []bool{})
-				if currentSelection >= len(flatTree) {
-					currentSelection = len(flatTree) - 1
-				}
 			case tcell.KeyEscape, tcell.KeyCtrlC:
 				return
 			case tcell.KeyRune:
 				switch ev.Rune() {
+				case 'E', 'e':
+					handleSelection(flatTree[currentSelection])
+					// Rebuild the tree after selection
+					tree = buildTree(root)
+					flatTree = flattenTree(tree, []bool{})
+					if currentSelection >= len(flatTree) {
+						currentSelection = len(flatTree) - 1
+					}
 				case 'N', 'n':
 					if isDir(flatTree[currentSelection].Path) {
 						handleNew(flatTree[currentSelection])
@@ -391,9 +392,9 @@ func renderFooter(selectedItem TreeItem) {
 	width, height := screen.Size()
 	hint := ""
 	if isFile(selectedItem.Path) {
-		hint = "Enter: Edit | D: Delete | M: Move"
+		hint = "E: Edit | D: Delete | M: Move"
 	} else {
-		hint = "N: New | Enter: Edit | D: Delete"
+		hint = "N: New | E: Edit | D: Delete"
 	}
 	clearArea(0, height-1, width, height)
 	renderText(0, height-1, hint, tcell.StyleDefault)
