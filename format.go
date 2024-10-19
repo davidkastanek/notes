@@ -10,6 +10,33 @@ import (
 	"strings"
 )
 
+// Helper function to render markdown output including ANSI escape sequences
+func renderMarkdown(x, y int, content []byte) {
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	row := y
+	for scanner.Scan() {
+		line := scanner.Text()
+		cols := processANSIStrings(line)
+		col := x
+		for _, colData := range cols {
+			style := tcell.StyleDefault
+			if colData.Style.Bold {
+				style = style.Bold(true)
+			}
+			if colData.Style.Underline {
+				style = style.Underline(true)
+			}
+			style = style.Foreground(colData.Style.Foreground)
+			style = style.Background(colData.Style.Background)
+			for _, r := range colData.Text {
+				screen.SetContent(col, row, r, nil, style)
+				col += runewidth.RuneWidth(r)
+			}
+		}
+		row++
+	}
+}
+
 // Parse ANSI code string and update the current style
 func parseANSICode(code string, style TextStyle) TextStyle {
 	parts := strings.Split(code, ";")
@@ -85,46 +112,6 @@ func processANSIStrings(s string) []ColData {
 		})
 	}
 	return cols
-}
-
-// Helper function to render markdown output including ANSI escape sequences
-func renderMarkdown(x, y int, content []byte) {
-	scanner := bufio.NewScanner(bytes.NewReader(content))
-	row := y
-	for scanner.Scan() {
-		line := scanner.Text()
-		cols := processANSIStrings(line)
-		col := x
-		for _, colData := range cols {
-			style := tcell.StyleDefault
-			if colData.Style.Bold {
-				style = style.Bold(true)
-			}
-			if colData.Style.Underline {
-				style = style.Underline(true)
-			}
-			style = style.Foreground(colData.Style.Foreground)
-			style = style.Background(colData.Style.Background)
-			for _, r := range colData.Text {
-				screen.SetContent(col, row, r, nil, style)
-				col += runewidth.RuneWidth(r)
-			}
-		}
-		row++
-	}
-}
-
-// Struct to hold text and style after processing ANSI escape sequences
-type ColData struct {
-	Text  string
-	Style TextStyle
-}
-
-type TextStyle struct {
-	Bold       bool
-	Underline  bool
-	Foreground tcell.Color
-	Background tcell.Color
 }
 
 func formatTreeItem(item TreeItem) string {

@@ -22,6 +22,19 @@ type TreeItem struct {
 	Prefixes []bool     // Indentation prefixes
 }
 
+// Struct to hold text and style after processing ANSI escape sequences
+type ColData struct {
+	Text  string
+	Style TextStyle
+}
+
+type TextStyle struct {
+	Bold       bool
+	Underline  bool
+	Foreground tcell.Color
+	Background tcell.Color
+}
+
 func main() {
 	d := flag.String("d", "", "Path to directory with notes")
 	flag.Parse()

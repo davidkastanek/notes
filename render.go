@@ -37,7 +37,7 @@ func renderMarkdownPreview(path string, startX int) {
 		if err != nil {
 			return
 		}
-		lines := markdown.Render(string(source), height-2, 0)
+		lines := markdown.Render(string(source), (width-width/5)-2, 0)
 		// Clear previous preview content
 		renderClearArea(startX, 0, width, height-2)
 		renderMarkdown(startX, 1, lines)
