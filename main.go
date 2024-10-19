@@ -1,13 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"flag"
 )
 
 var screen tcell.Screen
@@ -47,7 +47,6 @@ func main() {
 	defer func() {
 		screen.Fini()
 		resetTerminal()
-		fmt.Print("\033[H\033[2J") // Clear the console window on exit
 	}()
 
 	// Start a goroutine to listen for signals
