@@ -29,7 +29,7 @@ type TreeItem struct {
 }
 
 func main() {
-	root = "notes"
+	root = "root"
 	var err error
 
 	// Create a channel to listen for termination signals
@@ -201,10 +201,10 @@ func renderTree(tree []TreeItem, currentSelection int) {
 	screen.Clear()
 	width, height := screen.Size()
 	separatorX := width / 5
-	previewStartX := separatorX + 5
+	previewStartX := separatorX + 3
 
 	// Draw vertical line separator
-	for y := 0; y < height-1; y++ {
+	for y := 0; y < height-2; y++ {
 		screen.SetContent(separatorX, y, '│', nil, tcell.StyleDefault)
 	}
 
@@ -274,13 +274,13 @@ func renderMarkdownPreview(path string, startX int) {
 		if err != nil {
 			return
 		}
-		lines := markdown.Render(string(source), height-1, 0)
+		lines := markdown.Render(string(source), height-2, 0)
 		// Clear previous preview content
-		clearArea(startX, 0, width, height-1)
+		clearArea(startX, 0, width, height-2)
 		renderMarkdown(startX, 0, lines)
 	} else {
 		// Clear preview area if not a file
-		clearArea(startX, 0, width, height-1)
+		clearArea(startX, 0, width, height-2)
 	}
 }
 
