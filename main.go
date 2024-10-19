@@ -59,8 +59,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	tree = buildTree(root)
-	flatTree := flattenTree(tree, []bool{})
+	rootItem := buildTree(root)
+	flatTree := flattenTree(rootItem, []bool{})
 	currentSelection = 0
 
 	// Main loop for rendering and interacting with tree
@@ -83,35 +83,38 @@ func main() {
 				return
 			case tcell.KeyRune:
 				switch ev.Rune() {
+				case 'Q', 'q':
+					// Exit the application
+					return
 				case 'E', 'e':
 					handleSelection(flatTree[currentSelection])
 					// Rebuild the tree after selection
-					tree = buildTree(root)
-					flatTree = flattenTree(tree, []bool{})
+					rootItem := buildTree(root)
+					flatTree = flattenTree(rootItem, []bool{})
 					if currentSelection >= len(flatTree) {
 						currentSelection = len(flatTree) - 1
 					}
 				case 'N', 'n':
 					if isDir(flatTree[currentSelection].Path) {
 						handleNew(flatTree[currentSelection])
-						tree = buildTree(root)
-						flatTree = flattenTree(tree, []bool{})
+						rootItem := buildTree(root)
+						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
 						}
 					}
 				case 'D', 'd':
 					handleDelete(flatTree[currentSelection])
-					tree = buildTree(root)
-					flatTree = flattenTree(tree, []bool{})
+					rootItem := buildTree(root)
+					flatTree = flattenTree(rootItem, []bool{})
 					if currentSelection >= len(flatTree) {
 						currentSelection = len(flatTree) - 1
 					}
 				case 'M', 'm':
 					if isFile(flatTree[currentSelection].Path) {
 						handleMove(flatTree[currentSelection])
-						tree = buildTree(root)
-						flatTree = flattenTree(tree, []bool{})
+						rootItem := buildTree(root)
+						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
 						}
@@ -130,51 +133,65 @@ func resetTerminal() {
 	_ = cmd.Run()
 }
 
-// Build the tree recursively
-func buildTree(path string) []TreeItem {
-	items := []TreeItem{}
+// Build the tree recursively and return the root TreeItem
+func buildTree(path string) TreeItem {
+	rootItem := TreeItem{
+		Display: filepath.Base(path),
+		Path:    path,
+		IsLast:  true, // Root is considered the last item at its level
+	}
+
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return items
+		return rootItem
 	}
 
 	numEntries := len(entries)
 	for i, entry := range entries {
 		itemPath := filepath.Join(path, entry.Name())
 		isLastEntry := i == numEntries-1
-		item := TreeItem{
+		childItem := TreeItem{
 			Display: entry.Name(),
 			Path:    itemPath,
 			IsLast:  isLastEntry,
 		}
 
 		if entry.IsDir() {
-			item.Children = buildTree(itemPath)
+			childItem = buildTree(itemPath)
+			childItem.Display = entry.Name()
+			childItem.Path = itemPath
+			childItem.IsLast = isLastEntry
 		}
-		items = append(items, item)
+
+		rootItem.Children = append(rootItem.Children, childItem)
 	}
-	return items
+	return rootItem
 }
 
-// Flatten the tree for rendering
-func flattenTree(tree []TreeItem, prefixes []bool) []TreeItem {
+// Flatten the tree starting from the root item
+func flattenTree(item TreeItem, prefixes []bool) []TreeItem {
 	var flatTree []TreeItem
-	for i, item := range tree {
-		// Create a copy of prefixes for this item
-		item.Prefixes = make([]bool, len(prefixes))
-		copy(item.Prefixes, prefixes)
-		item.IsLast = i == len(tree)-1
-		flatTree = append(flatTree, item)
-		// Update prefixes for children
+	// Set prefixes for this item
+	item.Prefixes = make([]bool, len(prefixes))
+	copy(item.Prefixes, prefixes)
+	flatTree = append(flatTree, item)
+
+	// For the children, update prefixes
+	numChildren := len(item.Children)
+	for i, child := range item.Children {
+		child.IsLast = i == numChildren-1
+		// Create a copy of prefixes for the child
 		childPrefixes := make([]bool, len(prefixes))
 		copy(childPrefixes, prefixes)
-		// If item is not last, we need to draw '│' at this level
-		childPrefixes = append(childPrefixes, !item.IsLast)
-
-		if item.Children != nil && len(item.Children) > 0 {
-			childItems := flattenTree(item.Children, childPrefixes)
-			flatTree = append(flatTree, childItems...)
+		if len(prefixes) > 0 {
+			// If the parent is not the root, append the appropriate prefix
+			childPrefixes = append(childPrefixes, !item.IsLast)
+		} else {
+			// For the root node, we start prefixes for its children
+			childPrefixes = append(childPrefixes, false)
 		}
+		// Recursively flatten the child
+		flatTree = append(flatTree, flattenTree(child, childPrefixes)...)
 	}
 	return flatTree
 }
@@ -218,19 +235,34 @@ func drawHorizontalSeparator(x, y, width int) {
 
 func formatTreeItem(item TreeItem) string {
 	var builder strings.Builder
-	for i := 0; i < len(item.Prefixes); i++ {
-		if item.Prefixes[i] {
-			builder.WriteString("│   ")
-		} else {
-			builder.WriteString("    ")
-		}
-	}
-	if item.IsLast {
-		builder.WriteString("└── ")
+	if len(item.Prefixes) == 0 {
+		// Root node, no prefixes or tree characters
+		builder.WriteString(item.Display)
 	} else {
-		builder.WriteString("├── ")
+		for i := 0; i < len(item.Prefixes)-1; i++ {
+			if item.Prefixes[i] {
+				builder.WriteString("│   ")
+			} else {
+				builder.WriteString("    ")
+			}
+		}
+		// Handle the final prefix before the item
+		if len(item.Prefixes) > 0 {
+			if item.Prefixes[len(item.Prefixes)-1] {
+				builder.WriteString("│   ")
+			} else {
+				builder.WriteString("    ")
+			}
+		}
+
+		// Add branch
+		if item.IsLast {
+			builder.WriteString("└── ")
+		} else {
+			builder.WriteString("├── ")
+		}
+		builder.WriteString(item.Display)
 	}
-	builder.WriteString(item.Display)
 	return builder.String()
 }
 
@@ -392,9 +424,9 @@ func renderFooter(selectedItem TreeItem) {
 	width, height := screen.Size()
 	hint := ""
 	if isFile(selectedItem.Path) {
-		hint = "E: Edit | D: Delete | M: Move"
+		hint = "E: Edit | D: Delete | M: Move | Q: Quit"
 	} else {
-		hint = "N: New | E: Edit | D: Delete"
+		hint = "N: New Dir | F: New File | E: Rename | D: Delete | Q: Quit"
 	}
 	clearArea(0, height-1, width, height)
 	renderText(0, height-1, hint, tcell.StyleDefault)
