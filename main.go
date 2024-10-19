@@ -42,6 +42,7 @@ func main() {
 		fmt.Println("Error: no directory provided. Use -d to specify a directory.")
 		os.Exit(1)
 	}
+	dir := *d
 
 	// Create a channel to listen for termination signals
 	sigChan := make(chan os.Signal, 1)
@@ -70,7 +71,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	rootItem := buildTree(*d)
+	rootItem := buildTree(dir)
 	flatTree := flattenTree(rootItem, []bool{})
 	currentSelection = 0
 
@@ -100,7 +101,7 @@ func main() {
 				case 'E', 'e':
 					handleSelection(flatTree[currentSelection])
 					// Rebuild the tree after selection
-					rootItem := buildTree(root)
+					rootItem := buildTree(dir)
 					flatTree = flattenTree(rootItem, []bool{})
 					if currentSelection >= len(flatTree) {
 						currentSelection = len(flatTree) - 1
@@ -108,7 +109,7 @@ func main() {
 				case 'N', 'n':
 					if isDir(flatTree[currentSelection].Path) {
 						handleNew(flatTree[currentSelection])
-						rootItem := buildTree(root)
+						rootItem := buildTree(dir)
 						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
@@ -116,7 +117,7 @@ func main() {
 					}
 				case 'D', 'd':
 					handleDelete(flatTree[currentSelection])
-					rootItem := buildTree(root)
+					rootItem := buildTree(dir)
 					flatTree = flattenTree(rootItem, []bool{})
 					if currentSelection >= len(flatTree) {
 						currentSelection = len(flatTree) - 1
@@ -124,7 +125,7 @@ func main() {
 				case 'M', 'm':
 					if isFile(flatTree[currentSelection].Path) {
 						handleMove(flatTree[currentSelection])
-						rootItem := buildTree(root)
+						rootItem := buildTree(dir)
 						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
