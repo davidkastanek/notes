@@ -132,17 +132,17 @@ func formatTreeItem(item TreeItem) string {
 
 	for i := 0; i < len(item.Prefixes)-1; i++ {
 		if item.Prefixes[i] {
-			builder.WriteString("│   ")
+			builder.WriteString("│  ")
 		} else {
-			builder.WriteString("    ")
+			builder.WriteString("   ")
 		}
 	}
 
 	if len(item.Prefixes) > 0 {
 		if item.Prefixes[len(item.Prefixes)-1] {
-			builder.WriteString("├── ")
+			builder.WriteString("├─ ")
 		} else {
-			builder.WriteString("└── ")
+			builder.WriteString("└─ ")
 		}
 	}
 

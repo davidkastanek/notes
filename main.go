@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"flag"
 )
 
 var screen tcell.Screen
@@ -22,13 +23,18 @@ type TreeItem struct {
 }
 
 func main() {
-	root = "root"
-	var err error
+	d := flag.String("d", "", "Path to directory with notes")
+	flag.Parse()
+	if *d == "" {
+		fmt.Println("Error: no directory provided. Use -d to specify a directory.")
+		os.Exit(1)
+	}
 
 	// Create a channel to listen for termination signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	var err error
 	// Initialize the terminal screen
 	screen, err = tcell.NewScreen()
 	if err != nil {
@@ -52,7 +58,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	rootItem := buildTree(root)
+	rootItem := buildTree(*d)
 	flatTree := flattenTree(rootItem, []bool{})
 	currentSelection = 0
 
