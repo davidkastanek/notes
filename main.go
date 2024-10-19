@@ -9,8 +9,10 @@ import (
 	"github.com/mattn/go-runewidth"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 var screen tcell.Screen
@@ -23,14 +25,18 @@ type TreeItem struct {
 	Path     string     // The full path to the item
 	Children []TreeItem // Child items (for directories)
 	IsLast   bool       // Whether this item is the last child at its level
-	Level    int        // The level of indentation
+	Prefixes []bool     // Indentation prefixes
 }
 
 func main() {
 	root = "notes"
+	var err error
+
+	// Create a channel to listen for termination signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Initialize the terminal screen
-	var err error
 	screen, err = tcell.NewScreen()
 	if err != nil {
 		panic(err)
@@ -39,10 +45,22 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer screen.Fini()
+	defer func() {
+		screen.Fini()
+		resetTerminal()
+		fmt.Print("\033[H\033[2J") // Clear the console window on exit
+	}()
 
-	tree = buildTree(root, 0, true)
-	flatTree := flattenTree(tree)
+	// Start a goroutine to listen for signals
+	go func() {
+		<-sigChan
+		screen.Fini()
+		fmt.Print("\033[H\033[2J")
+		os.Exit(0)
+	}()
+
+	tree = buildTree(root)
+	flatTree := flattenTree(tree, []bool{})
 	currentSelection = 0
 
 	// Main loop for rendering and interacting with tree
@@ -63,8 +81,8 @@ func main() {
 				}
 			case tcell.KeyEnter:
 				handleSelection(flatTree[currentSelection])
-				tree = buildTree(root, 0, true)
-				flatTree = flattenTree(tree)
+				tree = buildTree(root)
+				flatTree = flattenTree(tree, []bool{})
 				if currentSelection >= len(flatTree) {
 					currentSelection = len(flatTree) - 1
 				}
@@ -75,24 +93,24 @@ func main() {
 				case 'N', 'n':
 					if isDir(flatTree[currentSelection].Path) {
 						handleNew(flatTree[currentSelection])
-						tree = buildTree(root, 0, true)
-						flatTree = flattenTree(tree)
+						tree = buildTree(root)
+						flatTree = flattenTree(tree, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
 						}
 					}
 				case 'D', 'd':
 					handleDelete(flatTree[currentSelection])
-					tree = buildTree(root, 0, true)
-					flatTree = flattenTree(tree)
+					tree = buildTree(root)
+					flatTree = flattenTree(tree, []bool{})
 					if currentSelection >= len(flatTree) {
 						currentSelection = len(flatTree) - 1
 					}
 				case 'M', 'm':
 					if isFile(flatTree[currentSelection].Path) {
 						handleMove(flatTree[currentSelection])
-						tree = buildTree(root, 0, true)
-						flatTree = flattenTree(tree)
+						tree = buildTree(root)
+						flatTree = flattenTree(tree, []bool{})
 						if currentSelection >= len(flatTree) {
 							currentSelection = len(flatTree) - 1
 						}
@@ -103,42 +121,58 @@ func main() {
 	}
 }
 
+func resetTerminal() {
+	cmd := exec.Command("stty", "sane")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+}
+
 // Build the tree recursively
-func buildTree(path string, level int, isLast bool) []TreeItem {
+func buildTree(path string) []TreeItem {
 	items := []TreeItem{}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return items
 	}
 
+	numEntries := len(entries)
 	for i, entry := range entries {
 		itemPath := filepath.Join(path, entry.Name())
+		isLastEntry := i == numEntries-1
 		item := TreeItem{
-			Path:   itemPath,
-			IsLast: i == len(entries)-1,
-			Level:  level,
+			Display: entry.Name(),
+			Path:    itemPath,
+			IsLast:  isLastEntry,
 		}
 
 		if entry.IsDir() {
-			item.Display = entry.Name()
-			item.Children = buildTree(itemPath, level+1, item.IsLast)
-		} else {
-			item.Display = entry.Name()
+			item.Children = buildTree(itemPath)
 		}
-
 		items = append(items, item)
 	}
-
 	return items
 }
 
 // Flatten the tree for rendering
-func flattenTree(tree []TreeItem) []TreeItem {
+func flattenTree(tree []TreeItem, prefixes []bool) []TreeItem {
 	var flatTree []TreeItem
-	for _, item := range tree {
+	for i, item := range tree {
+		// Create a copy of prefixes for this item
+		item.Prefixes = make([]bool, len(prefixes))
+		copy(item.Prefixes, prefixes)
+		item.IsLast = i == len(tree)-1
 		flatTree = append(flatTree, item)
-		if item.Children != nil {
-			flatTree = append(flatTree, flattenTree(item.Children)...)
+		// Update prefixes for children
+		childPrefixes := make([]bool, len(prefixes))
+		copy(childPrefixes, prefixes)
+		// If item is not last, we need to draw '│' at this level
+		childPrefixes = append(childPrefixes, !item.IsLast)
+
+		if item.Children != nil && len(item.Children) > 0 {
+			childItems := flattenTree(item.Children, childPrefixes)
+			flatTree = append(flatTree, childItems...)
 		}
 	}
 	return flatTree
@@ -147,8 +181,14 @@ func flattenTree(tree []TreeItem) []TreeItem {
 // Render the directory tree and highlight the current selection
 func renderTree(tree []TreeItem, currentSelection int) {
 	screen.Clear()
-	width, _ := screen.Size()
-	previewStartX := width / 4
+	width, height := screen.Size()
+	separatorX := width / 5
+	previewStartX := separatorX + 5
+
+	// Draw vertical line separator
+	for y := 0; y < height-1; y++ {
+		screen.SetContent(separatorX, y, '│', nil, tcell.StyleDefault)
+	}
 
 	// Render the tree and highlight the current selection
 	for i, item := range tree {
@@ -160,15 +200,29 @@ func renderTree(tree []TreeItem, currentSelection int) {
 		}
 		renderText(0, i, line, style)
 	}
+
+	// Draw horizontal separator above the footer
+	drawHorizontalSeparator(0, height-2, width)
+
 	// Render the footer with available key actions
 	renderFooter(tree[currentSelection])
 	screen.Show()
 }
 
+func drawHorizontalSeparator(x, y, width int) {
+	for i := x; i < width; i++ {
+		screen.SetContent(i, y, '─', nil, tcell.StyleDefault)
+	}
+}
+
 func formatTreeItem(item TreeItem) string {
 	var builder strings.Builder
-	for i := 0; i < item.Level; i++ {
-		builder.WriteString("│   ")
+	for i := 0; i < len(item.Prefixes); i++ {
+		if item.Prefixes[i] {
+			builder.WriteString("│   ")
+		} else {
+			builder.WriteString("    ")
+		}
 	}
 	if item.IsLast {
 		builder.WriteString("└── ")
@@ -181,20 +235,19 @@ func formatTreeItem(item TreeItem) string {
 
 // Render markdown preview for files
 func renderMarkdownPreview(path string, startX int) {
+	width, height := screen.Size()
 	if isFile(path) {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			return
 		}
-
-		result := markdown.Render(string(source), 150, 0)
-
+		lines := markdown.Render(string(source), height-1, 0)
 		// Clear previous preview content
-		clearArea(startX, 0, startX+80, 20)
-		renderMarkdown(startX, 0, result)
+		clearArea(startX, 0, width, height-1)
+		renderMarkdown(startX, 0, lines)
 	} else {
 		// Clear preview area if not a file
-		clearArea(startX, 0, startX+80, 20)
+		clearArea(startX, 0, width, height-1)
 	}
 }
 
@@ -216,7 +269,6 @@ func renderMarkdown(x, y int, content []byte) {
 			}
 			style = style.Foreground(colData.Style.Foreground)
 			style = style.Background(colData.Style.Background)
-
 			for _, r := range colData.Text {
 				screen.SetContent(col, row, r, nil, style)
 				col += runewidth.RuneWidth(r)
@@ -371,10 +423,17 @@ func openInVim(path string) {
 	err := cmd.Run()
 	if err != nil {
 		fmt.Printf("Error opening file: %s\n", err)
-		os.Exit(1) // Exiting since screen isn't initialized
+		// Re-initialize the screen before returning
+		initializeScreen()
+		showError("Error opening Vim: " + err.Error())
+		return
 	}
 
 	// Re-create and re-initialize the screen after Vim exits
+	initializeScreen()
+}
+
+func initializeScreen() {
 	var errInit error
 	screen, errInit = tcell.NewScreen()
 	if errInit != nil {
