@@ -99,7 +99,17 @@ func main() {
 					// Exit the application
 					return
 				case 'E', 'e':
-					handleSelection(flatTree[currentSelection])
+					if isFile(flatTree[currentSelection].Path) {
+						openVim(flatTree[currentSelection].Path)
+					}
+					// Rebuild the tree after selection
+					rootItem := buildTree(dir)
+					flatTree = flattenTree(rootItem, []bool{})
+					if currentSelection >= len(flatTree) {
+						currentSelection = len(flatTree) - 1
+					}
+				case 'R', 'r':
+					handleRename(flatTree[currentSelection])
 					// Rebuild the tree after selection
 					rootItem := buildTree(dir)
 					flatTree = flattenTree(rootItem, []bool{})
@@ -210,4 +220,13 @@ func isDir(path string) bool {
 		return false
 	}
 	return fi.IsDir()
+}
+
+func prefixRelativePath(inputPath string) string {
+	// If the path is absolute, return it as is
+	if filepath.IsAbs(inputPath) {
+		return inputPath
+	}
+	// Otherwise, join the inputPath with the root (notes directory)
+	return filepath.Join(root, inputPath)
 }

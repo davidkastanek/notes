@@ -21,9 +21,9 @@ func renderFooter(selectedItem TreeItem) {
 	width, height := screen.Size()
 	hint := ""
 	if isFile(selectedItem.Path) {
-		hint = "E: Edit | D: Delete | M: Move | Q: Quit"
+		hint = "E: Edit | R: Rename | M: Move | D: Delete | Q: Quit"
 	} else {
-		hint = "N: New Dir/File | E: Rename | D: Delete | Q: Quit"
+		hint = "N: New | R: Rename | D: Delete | Q: Quit"
 	}
 	renderClearArea(0, height-1, width, height)
 	renderText(0, height-1, hint, tcell.StyleDefault)

@@ -81,6 +81,8 @@ func handleMove(item TreeItem) {
 		return
 	}
 
+	newPath = prefixRelativePath(newPath)
+
 	// Check if the destination file already exists
 	if _, err := os.Stat(newPath); err == nil {
 		renderError("File already exists at destination")
@@ -122,15 +124,6 @@ func handleRename(item TreeItem) {
 	err := os.Rename(item.Path, newPath)
 	if err != nil {
 		renderError("Error renaming: " + err.Error())
-	}
-}
-
-// Handle actions when an item is selected
-func handleSelection(item TreeItem) {
-	if isFile(item.Path) {
-		openVim(item.Path)
-	} else {
-		handleRename(item)
 	}
 }
 
