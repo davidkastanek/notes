@@ -7,12 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
 var screen tcell.Screen
 var currentSelection int
-var root string
 
 type TreeItem struct {
 	Display  string     // The string to display
@@ -118,7 +118,7 @@ func main() {
 					}
 				case 'N', 'n':
 					if isDir(flatTree[currentSelection].Path) {
-						handleNew(flatTree[currentSelection])
+						handleNew(flatTree[currentSelection], rootItem.Path)
 						rootItem := buildTree(dir)
 						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
@@ -134,7 +134,7 @@ func main() {
 					}
 				case 'M', 'm':
 					if isFile(flatTree[currentSelection].Path) {
-						handleMove(flatTree[currentSelection])
+						handleMove(flatTree[currentSelection], rootItem.Path)
 						rootItem := buildTree(dir)
 						flatTree = flattenTree(rootItem, []bool{})
 						if currentSelection >= len(flatTree) {
@@ -222,11 +222,41 @@ func isDir(path string) bool {
 	return fi.IsDir()
 }
 
-func prefixRelativePath(inputPath string) string {
-	// If the path is absolute, return it as is
-	if filepath.IsAbs(inputPath) {
-		return inputPath
+func resolveAndValidatePath(inputPath string, rootItemPath string) (string, error) {
+	// Expand '~' to user home directory
+	if strings.HasPrefix(inputPath, "~") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("Unable to determine home directory")
+		}
+		inputPath = filepath.Join(homeDir, strings.TrimPrefix(inputPath, "~"))
 	}
-	// Otherwise, join the inputPath with the root (notes directory)
-	return filepath.Join(root, inputPath)
+
+	// If the path is not absolute, make it relative to the notes directory
+	var resolvedPath string
+	if !filepath.IsAbs(inputPath) {
+		resolvedPath = filepath.Join(rootItemPath, inputPath)
+	} else {
+		resolvedPath = inputPath
+	}
+
+	// Clean the path (resolve '..', '.', etc.)
+	resolvedPath = filepath.Clean(resolvedPath)
+
+	// Get absolute paths for comparison
+	absResolvedPath, err := filepath.Abs(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("Invalid path")
+	}
+	absRoot, err := filepath.Abs(rootItemPath)
+	if err != nil {
+		return "", fmt.Errorf("Invalid root path")
+	}
+
+	// Check if the resolved path is within the notes directory
+	if !strings.HasPrefix(absResolvedPath, absRoot) {
+		return "", fmt.Errorf("Path must be within the notes directory")
+	}
+
+	return resolvedPath, nil
 }

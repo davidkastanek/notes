@@ -10,21 +10,42 @@ import (
 )
 
 // Handle creating a new file or directory
-func handleNew(item TreeItem) {
+func handleNew(item TreeItem, rootItemPath string) {
 	if !isDir(item.Path) {
-		// Cannot create new file inside a file
-		renderError("Cannot create new file inside a file")
+		// Cannot create a new file or directory inside a file
+		renderError("Cannot create new file or directory inside a file")
 		return
 	}
 
-	prompt := "Enter new file/directory name: "
-	name, ok := getUserInput(prompt)
+	// Get the path of the selected directory relative to the root
+	currentRelPath, err := filepath.Rel(rootItemPath, item.Path)
+	if err != nil {
+		renderError("Error calculating relative path")
+		return
+	}
+
+	// Prepopulate default input with current relative path
+	var defaultInput string
+	if currentRelPath == "." {
+		defaultInput = ""
+	} else {
+		defaultInput = currentRelPath + "/"
+	}
+
+	prompt := "Enter new name: "
+	name, ok := getUserInput(prompt, defaultInput)
 	if !ok || name == "" {
 		return
 	}
 
-	newPath := filepath.Join(item.Path, name)
+	// Resolve and validate the path
+	newPath, err := resolveAndValidatePath(name, rootItemPath)
+	if err != nil {
+		renderError(err.Error())
+		return
+	}
 
+	// Determine if creating a directory or file based on the input
 	if strings.HasSuffix(name, "/") {
 		// Create a directory
 		err := os.MkdirAll(newPath, os.ModePerm)
@@ -33,14 +54,15 @@ func handleNew(item TreeItem) {
 			return
 		}
 	} else {
-		// Create directories if needed
+		// Ensure the directory exists
 		dirPath := filepath.Dir(newPath)
-		err := os.MkdirAll(dirPath, os.ModePerm)
-		if err != nil {
-			renderError("Error creating directories: " + err.Error())
-			return
+		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+			err = os.MkdirAll(dirPath, os.ModePerm)
+			if err != nil {
+				renderError("Error creating directories: " + err.Error())
+				return
+			}
 		}
-
 		// Create the file
 		file, err := os.Create(newPath)
 		if err != nil {
@@ -67,21 +89,32 @@ func handleDelete(item TreeItem) {
 	}
 }
 
-// Handle moving a file
-func handleMove(item TreeItem) {
+func handleMove(item TreeItem, rootItemPath string) {
 	if !isFile(item.Path) {
 		// Can't move a directory using 'M' key
 		renderError("Move operation is only for files")
 		return
 	}
 
-	prompt := "Enter new path: "
-	newPath, ok := getUserInput(prompt)
-	if !ok || newPath == "" {
+	// Calculate the path relative to the notes directory
+	currentRelPath, err := filepath.Rel(rootItemPath, item.Path)
+	if err != nil {
+		renderError("Error calculating relative path")
 		return
 	}
 
-	newPath = prefixRelativePath(newPath)
+	prompt := "Enter new path (relative to notes directory): "
+	inputPath, ok := getUserInput(prompt, currentRelPath)
+	if !ok || inputPath == "" || inputPath == currentRelPath {
+		return
+	}
+
+	// Resolve the new path relative to the notes directory
+	newPath, err := resolveAndValidatePath(inputPath, rootItemPath)
+	if err != nil {
+		renderError(err.Error())
+		return
+	}
 
 	// Check if the destination file already exists
 	if _, err := os.Stat(newPath); err == nil {
@@ -104,7 +137,7 @@ func handleMove(item TreeItem) {
 	}
 
 	// Move the file
-	err := os.Rename(item.Path, newPath)
+	err = os.Rename(item.Path, newPath)
 	if err != nil {
 		renderError("Error moving file: " + err.Error())
 		return
@@ -113,13 +146,22 @@ func handleMove(item TreeItem) {
 
 // Handle renaming of directories
 func handleRename(item TreeItem) {
+	currentName := filepath.Base(item.Path)
 	prompt := "Enter new name: "
-	newName, ok := getUserInput(prompt)
-	if !ok || newName == "" {
+	newName, ok := getUserInput(prompt, currentName)
+	if !ok || newName == "" || newName == currentName {
 		return
 	}
 
 	newPath := filepath.Join(filepath.Dir(item.Path), newName)
+
+	// Check if the destination already exists
+	if _, err := os.Stat(newPath); err == nil {
+		confirmPrompt := "A file or directory with that name already exists. Overwrite? (y/N): "
+		if !getConfirmation(confirmPrompt) {
+			return
+		}
+	}
 
 	err := os.Rename(item.Path, newPath)
 	if err != nil {
@@ -128,39 +170,59 @@ func handleRename(item TreeItem) {
 }
 
 // Get user input for prompts
-func getUserInput(prompt string) (string, bool) {
-	input := ""
+func getUserInput(prompt string, defaultValue string) (string, bool) {
+	input := []rune(defaultValue)
+	cursorPos := len(input)
 	width, height := screen.Size()
 	promptY := height - 1
 
-	// Clear the line
-	renderClearArea(0, promptY, width, height)
-	renderText(0, promptY, prompt+input, tcell.StyleDefault)
-	screen.Show()
-
 	for {
+		// Clear the line
+		renderClearArea(0, promptY, width, height)
+		// Render the prompt and input
+		renderText(0, promptY, prompt+string(input), tcell.StyleDefault)
+		// Move the cursor to the correct position
+		screen.ShowCursor(len(prompt)+cursorPos, promptY)
+		screen.Show()
+
 		ev := screen.PollEvent()
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyEsc, tcell.KeyCtrlC:
+				screen.HideCursor()
 				return "", false
 			case tcell.KeyEnter:
-				return input, true
+				screen.HideCursor()
+				return string(input), true
 			case tcell.KeyBackspace, tcell.KeyBackspace2:
-				if len(input) > 0 {
-					input = input[:len(input)-1]
+				if cursorPos > 0 {
+					input = append(input[:cursorPos-1], input[cursorPos:]...)
+					cursorPos--
 				}
+			case tcell.KeyDelete:
+				if cursorPos < len(input) {
+					input = append(input[:cursorPos], input[cursorPos+1:]...)
+				}
+			case tcell.KeyLeft:
+				if cursorPos > 0 {
+					cursorPos--
+				}
+			case tcell.KeyRight:
+				if cursorPos < len(input) {
+					cursorPos++
+				}
+			case tcell.KeyHome:
+				cursorPos = 0
+			case tcell.KeyEnd:
+				cursorPos = len(input)
 			default:
 				if ev.Rune() != 0 {
-					input += string(ev.Rune())
+					input = append(input[:cursorPos], append([]rune{ev.Rune()}, input[cursorPos:]...)...)
+					cursorPos++
 				}
 			}
 		}
-		// Clear the line
-		renderClearArea(0, promptY, width, height)
-		renderText(0, promptY, prompt+input, tcell.StyleDefault)
-		screen.Show()
 	}
 }
 
