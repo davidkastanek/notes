@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	markdown "github.com/MichaelMure/go-term-markdown"
@@ -48,6 +49,7 @@ func main() {
 		panic("cannot open root directory" + dir)
 	}
 
+	var userErr *userErr
 	rootItem := buildTree(dir)
 	flatTree := flattenTree(rootItem, []bool{})
 	var currentSelection = new(int)
@@ -95,7 +97,14 @@ func main() {
 					handleDelete(flatTree[*currentSelection], rootItem.Path, screen)
 					flatTree = rebuildTree(dir, currentSelection)
 				case 'M', 'm':
-					handleMove(flatTree[*currentSelection], rootItem.Path, screen)
+					err = handleMove(flatTree[*currentSelection], rootItem.Path, screen)
+					if err != nil {
+						if errors.As(err, &userErr) {
+							renderError(err.Error(), screen)
+						} else {
+							exitWithError(err)
+						}
+					}
 					flatTree = rebuildTree(dir, currentSelection)
 				}
 			}
@@ -213,7 +222,7 @@ func resolveAndValidatePath(inputPath string, rootItemPath string) (string, erro
 	if strings.HasPrefix(inputPath, "~") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return "", fmt.Errorf("Unable to determine home directory")
+			return "", fmt.Errorf("unable to determine home directory: %v", err)
 		}
 		inputPath = filepath.Join(homeDir, strings.TrimPrefix(inputPath, "~"))
 	}
@@ -224,12 +233,12 @@ func resolveAndValidatePath(inputPath string, rootItemPath string) (string, erro
 	// Ensure the resolved path is within the root directory
 	relPath, err := filepath.Rel(rootItemPath, resolvedPath)
 	if err != nil {
-		return "", fmt.Errorf("Invalid path")
+		return "", fmt.Errorf("error calculating relative path of %s against basepath %s", resolvedPath, rootItemPath)
 	}
 
-	// If the relative path starts with '..', it's outside the root directory
+	// If the relative path starts with two dots, it's outside the root directory
 	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
-		return "", fmt.Errorf("Path must be within the notes directory")
+		return "", userErr{"Path must be within the notes directory"}
 	}
 
 	return resolvedPath, nil
@@ -446,46 +455,42 @@ func handleDelete(item TreeItem, rootItemPath string, screen tcell.Screen) {
 	}
 }
 
-func handleMove(item TreeItem, rootItemPath string, screen tcell.Screen) {
+func handleMove(item TreeItem, rootItemPath string, screen tcell.Screen) error {
 	if item.Path == rootItemPath {
-		renderError("Cannot move the root directory", screen)
-		return
+		return userErr{"Cannot move to root directory"}
 	}
 
-	// Calculate the path relative to the notes directory
 	currentRelPath, err := filepath.Rel(rootItemPath, item.Path)
 	if err != nil {
-		renderError("Error calculating relative path", screen)
-		return
+		return fmt.Errorf("error calculating relative path of %s against basepath %s", item.Path, rootItemPath)
 	}
 
 	prompt := "Enter new path: "
 	inputPath, ok := getUserInput(prompt, currentRelPath, screen)
 	if !ok || inputPath == "" || inputPath == currentRelPath {
-		return
+		return nil
 	}
 
-	// Use the updated resolveAndValidatePath function
 	newPath, err := resolveAndValidatePath(inputPath, rootItemPath)
 	if err != nil {
-		renderError(err.Error(), screen)
-		return
+		var userErr *userErr
+		if errors.As(err, &userErr) {
+			return err
+		}
+		return fmt.Errorf("error resolving & validating path %s against %s: %v", inputPath, rootItemPath, err)
 	}
 
 	// Check if moving a directory into itself or its subdirectory
 	itemAbsPath, err := filepath.Abs(item.Path)
 	if err != nil {
-		renderError("Invalid source path", screen)
-		return
+		return fmt.Errorf("error getting absolute path for %s: %v", item.Path, err)
 	}
 	newAbsPath, err := filepath.Abs(newPath)
 	if err != nil {
-		renderError("Invalid destination path", screen)
-		return
+		return fmt.Errorf("error getting absolute path for %s: %v", item.Path, err)
 	}
 	if strings.HasPrefix(newAbsPath, itemAbsPath+string(os.PathSeparator)) {
-		renderError("Cannot move a directory into itself or its subdirectory", screen)
-		return
+		return userErr{"Cannot move a directory into itself or its subdirectory"}
 	}
 
 	// Check if the destination already exists
@@ -493,7 +498,7 @@ func handleMove(item TreeItem, rootItemPath string, screen tcell.Screen) {
 		// Destination exists
 		confirmPrompt := "Destination exists. Overwrite? (y/N): "
 		if !getConfirmation(confirmPrompt, screen) {
-			return
+			return nil
 		}
 	}
 
@@ -502,21 +507,21 @@ func handleMove(item TreeItem, rootItemPath string, screen tcell.Screen) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		confirmPrompt := "Directory does not exist. Create parent directories and move? (y/N): "
 		if !getConfirmation(confirmPrompt, screen) {
-			return
+			return nil
 		}
 		// Create required directories
 		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-			renderError("Error creating directories: "+err.Error(), screen)
-			return
+			return fmt.Errorf("error creating parent directory %s: %v", dir, err)
 		}
 	}
 
 	// Move the file or directory
 	err = os.Rename(item.Path, newPath)
 	if err != nil {
-		renderError("Error moving: "+err.Error(), screen)
-		return
+		return fmt.Errorf("error moving directory %s to %s: %v", item.Path, newAbsPath, err)
 	}
+
+	return nil
 }
 
 // Handle renaming of directories
@@ -701,4 +706,12 @@ func renderTree(tree []TreeItem, currentSelection *int, screen tcell.Screen) {
 func exitWithError(err error) {
 	fmt.Println(err.Error())
 	os.Exit(1)
+}
+
+type userErr struct {
+	msg string
+}
+
+func (e userErr) Error() string {
+	return e.msg
 }
