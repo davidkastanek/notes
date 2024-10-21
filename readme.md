@@ -24,3 +24,5 @@ go build -o n
 mv ./n ~/
 ~/n -d ~/Documents/notes
 ```
+### Backups
+Place the directory to any cloud file storage like Dropbox, Google Drive, etc. to keep your notes save and be able to get historical data if needed.

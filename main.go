@@ -16,27 +16,6 @@ import (
 	"syscall"
 )
 
-type TreeItem struct {
-	Display  string     // The string to display
-	Path     string     // The full path to the item
-	Children []TreeItem // Child items (for directories)
-	IsLast   bool       // Whether this item is the last child at its level
-	Prefixes []bool     // Indentation prefixes
-}
-
-// ColData Struct to hold text and style after processing ANSI escape sequences
-type ColData struct {
-	Text  string
-	Style TextStyle
-}
-
-type TextStyle struct {
-	Bold       bool
-	Underline  bool
-	Foreground tcell.Color
-	Background tcell.Color
-}
-
 func main() {
 	d := flag.String("d", "", "Path to directory with notes")
 	flag.Parse()
@@ -50,27 +29,19 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	var err error
-	// Initialize the terminal screen
-	var screen tcell.Screen
-	screen, err = tcell.NewScreen()
+	screen, err := initScreen()
 	if err != nil {
-		panic(err)
-	}
-	err = screen.Init()
-	if err != nil {
-		panic(err)
+		fmt.Println(err)
+		os.Exit(1)
 	}
 	defer func() {
-		screen.Fini()
-		resetTerminal()
+		resetScreen(screen)
 	}()
 
 	// Start a goroutine to listen for signals
 	go func() {
 		<-sigChan
-		screen.Fini()
-		fmt.Print("\033[H\033[2J")
+		resetScreen(screen)
 		os.Exit(0)
 	}()
 
@@ -104,13 +75,12 @@ func main() {
 			case tcell.KeyRune:
 				switch ev.Rune() {
 				case 'Q', 'q':
-					// Exit the application
 					return
 				case 'E', 'e':
 					if isFile(flatTree[*currentSelection].Path) {
 						screen = openVim(flatTree[*currentSelection].Path, screen)
+						flatTree = rebuildTree(dir, currentSelection)
 					}
-					flatTree = rebuildTree(dir, currentSelection)
 				case 'R', 'r':
 					handleRename(flatTree[*currentSelection], screen)
 					flatTree = rebuildTree(dir, currentSelection)
@@ -129,6 +99,27 @@ func main() {
 			}
 		}
 	}
+}
+
+type TreeItem struct {
+	Display  string     // The string to display
+	Path     string     // The full path to the item
+	Children []TreeItem // Child items (for directories)
+	IsLast   bool       // Whether this item is the last child at its level
+	Prefixes []bool     // Indentation prefixes
+}
+
+// ColData Struct to hold text and style after processing ANSI escape sequences
+type ColData struct {
+	Text  string
+	Style TextStyle
+}
+
+type TextStyle struct {
+	Bold       bool
+	Underline  bool
+	Foreground tcell.Color
+	Background tcell.Color
 }
 
 func rebuildTree(dir string, currentSelection *int) []TreeItem {
@@ -367,14 +358,6 @@ func formatTreeItem(item TreeItem) string {
 
 	builder.WriteString(item.Display)
 	return builder.String()
-}
-
-func resetTerminal() {
-	cmd := exec.Command("stty", "sane")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	_ = cmd.Run()
 }
 
 // Handle creating a new file or directory
