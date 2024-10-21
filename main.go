@@ -31,8 +31,7 @@ func main() {
 
 	screen, err := initScreen()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		exitWithError(err)
 	}
 	defer func() {
 		resetScreen(screen)
@@ -78,7 +77,10 @@ func main() {
 					return
 				case 'E', 'e':
 					if isFile(flatTree[*currentSelection].Path) {
-						screen = openVim(flatTree[*currentSelection].Path, screen)
+						screen, err = openVim(flatTree[*currentSelection].Path, screen)
+						if err != nil {
+							exitWithError(err)
+						}
 						flatTree = rebuildTree(dir, currentSelection)
 					}
 				case 'R', 'r':
@@ -626,51 +628,25 @@ func getConfirmation(prompt string, screen tcell.Screen) bool {
 }
 
 // Open a file in Vim
-func openVim(path string, screen tcell.Screen) tcell.Screen {
-	// Finalize the screen and restore the terminal state
-	screen.Fini()
+func openVim(path string, screen tcell.Screen) (tcell.Screen, error) {
+	resetScreen(screen)
 
 	// Run Vim
 	cmd := exec.Command("vim", path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	// Run the command
 	err := cmd.Run()
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error opening vim at %s: %w", path, err)
 	}
 
-	// Re-create and re-initialize the screen after Vim exits
-	afterVimScreen, newScreenErr := renderInitScreen()
-	if newScreenErr != nil {
-		panic(newScreenErr)
+	screen, err = initScreen()
+	if err != nil {
+		return nil, fmt.Errorf("error initializing screen after vim close: %v", err)
 	}
 
-	return afterVimScreen
-}
-
-// Render a line of text on the screen at a given x, y position
-func renderText(x, y int, text string, style tcell.Style, screen tcell.Screen) {
-	col := x
-	for _, r := range text {
-		screen.SetContent(col, y, r, nil, style)
-		col += runewidth.RuneWidth(r)
-	}
-}
-
-// Render footer with key hints
-func renderFooter(selectedItem TreeItem, screen tcell.Screen) {
-	width, height := screen.Size()
-	hint := "M: Move | R: Rename | D: Delete | Q: Quit"
-	if isDir(selectedItem.Path) {
-		hint = "N: New | " + hint
-	} else {
-		hint = "E: Edit | " + hint
-	}
-	renderClearArea(0, height-1, width, height, screen)
-	renderText(0, height-1, hint, tcell.StyleDefault, screen)
+	return screen, nil
 }
 
 // Render markdown preview for files
@@ -722,41 +698,7 @@ func renderTree(tree []TreeItem, currentSelection *int, screen tcell.Screen) {
 	screen.Show()
 }
 
-func renderHorizontalSeparator(x, y, width int, screen tcell.Screen) {
-	for i := x; i < width; i++ {
-		screen.SetContent(i, y, '─', nil, tcell.StyleDefault)
-	}
-}
-
-// Helper function to clear a rectangular area on the screen
-func renderClearArea(x1, y1, x2, y2 int, screen tcell.Screen) {
-	for x := x1; x < x2; x++ {
-		for y := y1; y < y2; y++ {
-			screen.SetContent(x, y, ' ', nil, tcell.StyleDefault)
-		}
-	}
-}
-
-// Show error messages
-func renderError(message string, screen tcell.Screen) {
-	width, height := screen.Size()
-	// Display the message at the bottom of the screen
-	y := height - 1
-	renderClearArea(0, y, width, height, screen)
-	renderText(0, y, "Error: "+message+" (Press any key to continue)", tcell.StyleDefault.Foreground(tcell.ColorRed), screen)
-	screen.Show()
-	// Wait for a key press to continue
-	screen.PollEvent()
-}
-
-func renderInitScreen() (tcell.Screen, error) {
-	screen, err := tcell.NewScreen()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tcell screen: %v", err)
-	}
-	err = screen.Init()
-	if err != nil {
-		return nil, fmt.Errorf("failed to init screen: %v", err)
-	}
-	return screen, nil
+func exitWithError(err error) {
+	fmt.Println(err.Error())
+	os.Exit(1)
 }
