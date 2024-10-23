@@ -26,7 +26,6 @@ func main() {
 	}
 	dir := *d
 
-	// Create a channel to listen for termination signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
@@ -38,7 +37,6 @@ func main() {
 		resetScreen(screen)
 	}()
 
-	// Start a goroutine to listen for signals
 	go func() {
 		<-sigChan
 		resetScreen(screen)
@@ -46,19 +44,16 @@ func main() {
 	}()
 
 	if !isDir(dir) {
-		panic("cannot open root directory" + dir)
+		exitWithError(errors.New("error: not a directory"))
 	}
 
-	var userErr *userErr
 	rootItem := buildTree(dir)
 	flatTree := flattenTree(rootItem, []bool{})
 	var currentSelection = new(int)
 	*currentSelection = 0
 
-	// Main loop for rendering and interacting with tree
 	for {
 		renderTree(flatTree, currentSelection, screen)
-		// Capture input and handle actions (navigation and commands)
 		ev := screen.PollEvent()
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
@@ -86,24 +81,29 @@ func main() {
 						flatTree = rebuildTree(dir, currentSelection)
 					}
 				case 'R', 'r':
-					handleRename(flatTree[*currentSelection], screen)
+					err = handleRename(flatTree[*currentSelection], screen)
+					if err != nil {
+						handleError(err, screen)
+					}
 					flatTree = rebuildTree(dir, currentSelection)
 				case 'N', 'n':
 					if isDir(flatTree[*currentSelection].Path) {
-						handleNew(flatTree[*currentSelection], rootItem.Path, screen)
+						err = handleNew(flatTree[*currentSelection], rootItem.Path, screen)
+						if err != nil {
+							handleError(err, screen)
+						}
 						flatTree = rebuildTree(dir, currentSelection)
 					}
 				case 'D', 'd':
-					handleDelete(flatTree[*currentSelection], rootItem.Path, screen)
+					err = handleDelete(flatTree[*currentSelection], rootItem.Path, screen)
+					if err != nil {
+						handleError(err, screen)
+					}
 					flatTree = rebuildTree(dir, currentSelection)
 				case 'M', 'm':
 					err = handleMove(flatTree[*currentSelection], rootItem.Path, screen)
 					if err != nil {
-						if errors.As(err, &userErr) {
-							renderError(err.Error(), screen)
-						} else {
-							exitWithError(err)
-						}
+						handleError(err, screen)
 					}
 					flatTree = rebuildTree(dir, currentSelection)
 				}
@@ -113,14 +113,13 @@ func main() {
 }
 
 type TreeItem struct {
-	Display  string     // The string to display
-	Path     string     // The full path to the item
-	Children []TreeItem // Child items (for directories)
-	IsLast   bool       // Whether this item is the last child at its level
-	Prefixes []bool     // Indentation prefixes
+	Display  string
+	Path     string
+	Children []TreeItem
+	IsLast   bool
+	Prefixes []bool
 }
 
-// ColData Struct to hold text and style after processing ANSI escape sequences
 type ColData struct {
 	Text  string
 	Style TextStyle
@@ -142,12 +141,11 @@ func rebuildTree(dir string, currentSelection *int) []TreeItem {
 	return flatTree
 }
 
-// Build the tree recursively and return the root TreeItem
 func buildTree(path string) TreeItem {
 	rootItem := TreeItem{
 		Display: filepath.Base(path),
 		Path:    path,
-		IsLast:  true, // Root is considered the last item at its level
+		IsLast:  true,
 	}
 
 	entries, err := os.ReadDir(path)
@@ -180,7 +178,6 @@ func buildTree(path string) TreeItem {
 func flattenTree(item TreeItem, prefixes []bool) []TreeItem {
 	var flatTree []TreeItem
 
-	// Set prefixes for this item
 	item.Prefixes = make([]bool, len(prefixes))
 	copy(item.Prefixes, prefixes)
 
@@ -190,7 +187,6 @@ func flattenTree(item TreeItem, prefixes []bool) []TreeItem {
 	for i, child := range item.Children {
 		isLastChild := i == numChildren-1
 
-		// Append to prefixes
 		childPrefixes := append(prefixes, !isLastChild)
 
 		flatTree = append(flatTree, flattenTree(child, childPrefixes)...)
@@ -199,7 +195,6 @@ func flattenTree(item TreeItem, prefixes []bool) []TreeItem {
 	return flatTree
 }
 
-// Check if the path is a file
 func isFile(path string) bool {
 	fileInfo, err := os.Stat(path)
 	if err != nil {
@@ -208,7 +203,6 @@ func isFile(path string) bool {
 	return !fileInfo.IsDir()
 }
 
-// Check if the path is a directory
 func isDir(path string) bool {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -218,7 +212,6 @@ func isDir(path string) bool {
 }
 
 func resolveAndValidatePath(inputPath string, rootItemPath string) (string, error) {
-	// Expand '~' to user home directory if present
 	if strings.HasPrefix(inputPath, "~") {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -227,16 +220,13 @@ func resolveAndValidatePath(inputPath string, rootItemPath string) (string, erro
 		inputPath = filepath.Join(homeDir, strings.TrimPrefix(inputPath, "~"))
 	}
 
-	// Combine the root path and input path, then clean the path
 	resolvedPath := filepath.Clean(filepath.Join(rootItemPath, inputPath))
 
-	// Ensure the resolved path is within the root directory
 	relPath, err := filepath.Rel(rootItemPath, resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("error calculating relative path of %s against basepath %s", resolvedPath, rootItemPath)
 	}
 
-	// If the relative path starts with two dots, it's outside the root directory
 	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
 		return "", userErr{"Path must be within the notes directory"}
 	}
@@ -244,7 +234,6 @@ func resolveAndValidatePath(inputPath string, rootItemPath string) (string, erro
 	return resolvedPath, nil
 }
 
-// Helper function to render markdown output including ANSI escape sequences
 func renderMarkdown(x, y int, content []byte, screen tcell.Screen) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	row := y
@@ -271,19 +260,15 @@ func renderMarkdown(x, y int, content []byte, screen tcell.Screen) {
 	}
 }
 
-// Parse ANSI code string and update the current style
 func parseANSICode(code string, style TextStyle) TextStyle {
 	parts := strings.Split(code, ";")
 	for _, part := range parts {
 		switch part {
 		case "0":
-			// Reset
 			style = TextStyle{}
 		case "1":
-			// Bold
 			style.Bold = true
 		case "4":
-			// Underline
 			style.Underline = true
 		case "30":
 			style.Foreground = tcell.ColorBlack
@@ -301,15 +286,12 @@ func parseANSICode(code string, style TextStyle) TextStyle {
 			style.Foreground = tcell.ColorTeal
 		case "37":
 			style.Foreground = tcell.ColorSilver
-		// Add more color codes as needed
 		default:
-			// Ignore unsupported codes
 		}
 	}
 	return style
 }
 
-// Process ANSI escape sequences and return a slice of ColData
 func processANSIStrings(s string) []ColData {
 	var cols []ColData
 	var currentStyle TextStyle
@@ -317,7 +299,6 @@ func processANSIStrings(s string) []ColData {
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' && i+2 < len(s) && s[i+1] == '[' {
-			// Flush current text
 			if textBuilder.Len() > 0 {
 				cols = append(cols, ColData{
 					Text:  textBuilder.String(),
@@ -325,7 +306,6 @@ func processANSIStrings(s string) []ColData {
 				})
 				textBuilder.Reset()
 			}
-			// Parse escape sequence
 			seqEnd := strings.Index(s[i:], "m")
 			if seqEnd == -1 {
 				break
@@ -338,7 +318,6 @@ func processANSIStrings(s string) []ColData {
 			i++
 		}
 	}
-	// Append remaining text
 	if textBuilder.Len() > 0 {
 		cols = append(cols, ColData{
 			Text:  textBuilder.String(),
@@ -371,185 +350,6 @@ func formatTreeItem(item TreeItem) string {
 	return builder.String()
 }
 
-// Handle creating a new file or directory
-func handleNew(item TreeItem, rootItemPath string, screen tcell.Screen) {
-	if !isDir(item.Path) {
-		// Cannot create a new file or directory inside a file
-		renderError("Cannot create new file or directory inside a file", screen)
-		return
-	}
-
-	// Get the path of the selected directory relative to the root
-	currentRelPath, err := filepath.Rel(rootItemPath, item.Path)
-	if err != nil {
-		renderError("Error calculating relative path", screen)
-		return
-	}
-
-	// Prepopulate default input with current relative path
-	var defaultInput string
-	if currentRelPath == "." {
-		defaultInput = ""
-	} else {
-		defaultInput = currentRelPath + "/"
-	}
-
-	prompt := "Enter new name: "
-	name, ok := getUserInput(prompt, defaultInput, screen)
-	if !ok || name == "" {
-		return
-	}
-
-	// Resolve and validate the path
-	newPath, err := resolveAndValidatePath(name, rootItemPath)
-	if err != nil {
-		renderError(err.Error(), screen)
-		return
-	}
-
-	// Determine if creating a directory or file based on the input
-	if strings.HasSuffix(name, "/") {
-		// Create a directory
-		err := os.MkdirAll(newPath, os.ModePerm)
-		if err != nil {
-			renderError("Error creating directory: "+err.Error(), screen)
-			return
-		}
-	} else {
-		// Ensure the directory exists
-		dirPath := filepath.Dir(newPath)
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			err = os.MkdirAll(dirPath, os.ModePerm)
-			if err != nil {
-				renderError("Error creating directories: "+err.Error(), screen)
-				return
-			}
-		}
-		// Create the file
-		file, err := os.Create(newPath)
-		if err != nil {
-			renderError("Error creating file: "+err.Error(), screen)
-			return
-		}
-		file.Close()
-	}
-}
-
-// Handle deleting files or directories
-func handleDelete(item TreeItem, rootItemPath string, screen tcell.Screen) {
-	if item.Path == rootItemPath {
-		renderError("Cannot delete the root directory", screen)
-		return
-	}
-	prompt := "Are you sure you want to delete " + item.Path + "? (y/N): "
-	if getConfirmation(prompt, screen) {
-		var err error
-		if isDir(item.Path) {
-			err = os.RemoveAll(item.Path)
-		} else {
-			err = os.Remove(item.Path)
-		}
-		if err != nil {
-			renderError("Error deleting: "+err.Error(), screen)
-		}
-	}
-}
-
-func handleMove(item TreeItem, rootItemPath string, screen tcell.Screen) error {
-	if item.Path == rootItemPath {
-		return userErr{"Cannot move to root directory"}
-	}
-
-	currentRelPath, err := filepath.Rel(rootItemPath, item.Path)
-	if err != nil {
-		return fmt.Errorf("error calculating relative path of %s against basepath %s", item.Path, rootItemPath)
-	}
-
-	prompt := "Enter new path: "
-	inputPath, ok := getUserInput(prompt, currentRelPath, screen)
-	if !ok || inputPath == "" || inputPath == currentRelPath {
-		return nil
-	}
-
-	newPath, err := resolveAndValidatePath(inputPath, rootItemPath)
-	if err != nil {
-		var userErr *userErr
-		if errors.As(err, &userErr) {
-			return err
-		}
-		return fmt.Errorf("error resolving & validating path %s against %s: %v", inputPath, rootItemPath, err)
-	}
-
-	// Check if moving a directory into itself or its subdirectory
-	itemAbsPath, err := filepath.Abs(item.Path)
-	if err != nil {
-		return fmt.Errorf("error getting absolute path for %s: %v", item.Path, err)
-	}
-	newAbsPath, err := filepath.Abs(newPath)
-	if err != nil {
-		return fmt.Errorf("error getting absolute path for %s: %v", item.Path, err)
-	}
-	if strings.HasPrefix(newAbsPath, itemAbsPath+string(os.PathSeparator)) {
-		return userErr{"Cannot move a directory into itself or its subdirectory"}
-	}
-
-	// Check if the destination already exists
-	if _, err := os.Stat(newPath); err == nil {
-		// Destination exists
-		confirmPrompt := "Destination exists. Overwrite? (y/N): "
-		if !getConfirmation(confirmPrompt, screen) {
-			return nil
-		}
-	}
-
-	// For moving, ensure the parent directory of the destination exists
-	dir := filepath.Dir(newPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		confirmPrompt := "Directory does not exist. Create parent directories and move? (y/N): "
-		if !getConfirmation(confirmPrompt, screen) {
-			return nil
-		}
-		// Create required directories
-		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-			return fmt.Errorf("error creating parent directory %s: %v", dir, err)
-		}
-	}
-
-	// Move the file or directory
-	err = os.Rename(item.Path, newPath)
-	if err != nil {
-		return fmt.Errorf("error moving directory %s to %s: %v", item.Path, newAbsPath, err)
-	}
-
-	return nil
-}
-
-// Handle renaming of directories
-func handleRename(item TreeItem, screen tcell.Screen) {
-	currentName := filepath.Base(item.Path)
-	prompt := "Enter new name: "
-	newName, ok := getUserInput(prompt, currentName, screen)
-	if !ok || newName == "" || newName == currentName {
-		return
-	}
-
-	newPath := filepath.Join(filepath.Dir(item.Path), newName)
-
-	// Check if the destination already exists
-	if _, err := os.Stat(newPath); err == nil {
-		confirmPrompt := "A file or directory with that name already exists. Overwrite? (y/N): "
-		if !getConfirmation(confirmPrompt, screen) {
-			return
-		}
-	}
-
-	err := os.Rename(item.Path, newPath)
-	if err != nil {
-		renderError("Error renaming: "+err.Error(), screen)
-	}
-}
-
-// Get user input for prompts
 func getUserInput(prompt string, defaultValue string, screen tcell.Screen) (string, bool) {
 	input := []rune(defaultValue)
 	cursorPos := len(input)
@@ -557,11 +357,8 @@ func getUserInput(prompt string, defaultValue string, screen tcell.Screen) (stri
 	promptY := height - 1
 
 	for {
-		// Clear the line
 		renderClearArea(0, promptY, width, height, screen)
-		// Render the prompt and input
 		renderText(0, promptY, prompt+string(input), tcell.StyleDefault, screen)
-		// Move the cursor to the correct position
 		screen.ShowCursor(len(prompt)+cursorPos, promptY)
 		screen.Show()
 
@@ -606,12 +403,10 @@ func getUserInput(prompt string, defaultValue string, screen tcell.Screen) (stri
 	}
 }
 
-// Get confirmation (yes/no) from user
 func getConfirmation(prompt string, screen tcell.Screen) bool {
 	width, height := screen.Size()
 	promptY := height - 1
 	for {
-		// Clear the line
 		renderClearArea(0, promptY, width, height, screen)
 		renderText(0, promptY, prompt, tcell.StyleDefault, screen)
 		screen.Show()
@@ -632,11 +427,9 @@ func getConfirmation(prompt string, screen tcell.Screen) bool {
 	}
 }
 
-// Open a file in Vim
 func openVim(path string, screen tcell.Screen) (tcell.Screen, error) {
 	resetScreen(screen)
 
-	// Run Vim
 	cmd := exec.Command("vim", path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -654,7 +447,6 @@ func openVim(path string, screen tcell.Screen) (tcell.Screen, error) {
 	return screen, nil
 }
 
-// Render markdown preview for files
 func renderMarkdownPreview(path string, startX int, screen tcell.Screen) {
 	width, height := screen.Size()
 	if isFile(path) {
@@ -663,28 +455,23 @@ func renderMarkdownPreview(path string, startX int, screen tcell.Screen) {
 			return
 		}
 		lines := markdown.Render(string(source), (width-width/5)-2, 0)
-		// Clear previous preview content
 		renderClearArea(startX, 0, width, height-2, screen)
 		renderMarkdown(startX, 1, lines, screen)
 	} else {
-		// Clear preview area if not a file
 		renderClearArea(startX, 0, width, height-2, screen)
 	}
 }
 
-// Render the directory tree and highlight the current selection
 func renderTree(tree []TreeItem, currentSelection *int, screen tcell.Screen) {
 	screen.Clear()
 	width, height := screen.Size()
 	separatorX := width / 5
 	previewStartX := separatorX + 3
 
-	// Draw vertical line separator
 	for y := 0; y < height-2; y++ {
 		screen.SetContent(separatorX, y, '│', nil, tcell.StyleDefault)
 	}
 
-	// Render the tree and highlight the current selection
 	for i, item := range tree {
 		line := formatTreeItem(item)
 		style := tcell.StyleDefault
@@ -695,23 +482,8 @@ func renderTree(tree []TreeItem, currentSelection *int, screen tcell.Screen) {
 		renderText(0, i, line, style, screen)
 	}
 
-	// Draw horizontal separator above the footer
 	renderHorizontalSeparator(0, height-2, width, screen)
 
-	// Render the footer with available key actions
 	renderFooter(tree[*currentSelection], screen)
 	screen.Show()
-}
-
-func exitWithError(err error) {
-	fmt.Println(err.Error())
-	os.Exit(1)
-}
-
-type userErr struct {
-	msg string
-}
-
-func (e userErr) Error() string {
-	return e.msg
 }
